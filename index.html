@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ARGOS — Chinese Satellite Monitor</title>
+  <link rel="stylesheet" href="src/styles.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/satellite.js/4.1.3/satellite.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/topojson-client@3/dist/topojson-client.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/d3-geo@3/dist/d3-geo.umd.min.js"></script>
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+        "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+      }
+    }
+  </script>
+</head>
+<body>
+  <div id="app">
+
+    <!-- Header -->
+    <header id="header">
+      <div class="logo">
+        <svg class="logo-icon" width="22" height="22" viewBox="0 0 22 22" fill="none">
+          <circle cx="11" cy="11" r="4" stroke="#00d4ff" stroke-width="1.5"/>
+          <ellipse cx="11" cy="11" rx="10" ry="4.5" stroke="#00d4ff" stroke-width="1" opacity="0.5"/>
+          <ellipse cx="11" cy="11" rx="10" ry="4.5" stroke="#00d4ff" stroke-width="1" opacity="0.5" transform="rotate(60 11 11)"/>
+          <ellipse cx="11" cy="11" rx="10" ry="4.5" stroke="#00d4ff" stroke-width="1" opacity="0.5" transform="rotate(120 11 11)"/>
+        </svg>
+        <span class="logo-text">ARGOS</span>
+        <span class="logo-sep">|</span>
+        <span class="logo-sub">Chinese Satellite Monitor</span>
+      </div>
+
+      <div id="search-container">
+        <svg class="search-icon" width="14" height="14" viewBox="0 0 14 14" fill="none">
+          <circle cx="5.5" cy="5.5" r="4" stroke="#6a7f95" stroke-width="1.2"/>
+          <line x1="8.5" y1="8.5" x2="13" y2="13" stroke="#6a7f95" stroke-width="1.2" stroke-linecap="round"/>
+        </svg>
+        <input type="text" id="search-input" placeholder="Search satellite name or NORAD ID…" autocomplete="off" spellcheck="false">
+        <div id="search-results"></div>
+      </div>
+
+      <div class="header-right">
+        <div class="stat-block">
+          <span class="stat-label">TRACKED</span>
+          <span class="stat-value" id="tracked-count">—</span>
+        </div>
+        <div class="stat-block">
+          <span class="stat-label">SELECTED</span>
+          <span class="stat-value" id="header-selected">—</span>
+        </div>
+        <!-- India coverage indicator -->
+        <div class="stat-block" id="india-badge">
+          <span class="stat-label india-label">▲ INDIA IN VIEW</span>
+          <span class="stat-value india-value" id="india-count">—</span>
+        </div>
+        <div class="live-badge">
+          <span class="pulse-dot"></span>
+          <span>LIVE</span>
+        </div>
+      </div>
+    </header>
+
+    <!-- Main area -->
+    <main id="main">
+      <canvas id="globe-canvas"></canvas>
+
+      <!-- Sidebar -->
+      <aside id="sidebar">
+
+        <!-- UTC Clock -->
+        <div class="panel">
+          <div class="panel-label">UTC TIME</div>
+          <div id="utc-clock">00:00:00</div>
+          <div id="utc-date">—</div>
+        </div>
+
+        <!-- Filters -->
+        <div class="panel">
+          <div class="panel-label">SATELLITE GROUPS</div>
+          <div id="filter-list">
+            <div class="filter-row active" data-group="chinese-leo">
+              <span class="filter-dot" style="background:#ff4444"></span>
+              <span class="filter-name">Chinese LEO</span>
+              <span class="filter-count" id="count-chinese-leo">…</span>
+            </div>
+            <div class="filter-row active" data-group="beidou">
+              <span class="filter-dot" style="background:#ffb300"></span>
+              <span class="filter-name">BeiDou GNSS</span>
+              <span class="filter-count" id="count-beidou">…</span>
+            </div>
+            <div class="filter-row active" data-group="tiangong">
+              <span class="filter-dot" style="background:#00d4ff"></span>
+              <span class="filter-name">Chinese Space Station</span>
+              <span class="filter-count" id="count-tiangong">…</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- India Coverage summary -->
+        <div class="panel">
+          <div class="panel-label">INDIA COVERAGE</div>
+          <div class="india-coverage-row">
+            <div class="india-cov-big" id="india-count-sidebar">—</div>
+            <div class="india-cov-sub">CHINESE SATELLITES<br>CURRENTLY IN VIEW</div>
+          </div>
+          <div class="india-cov-note">
+            Footprint radius computed at 0° elevation angle.
+            Subcontinent bounds: 6°–37°N · 60°–100°E
+          </div>
+        </div>
+
+        <!-- Selected satellite live data -->
+        <div class="panel" id="sel-panel" style="display:none">
+          <div class="panel-label">SELECTED OBJECT</div>
+          <div id="sel-name" class="sel-name">—</div>
+          <div id="sel-norad" class="sel-norad">NORAD —</div>
+          <div class="data-grid">
+            <div class="data-cell">
+              <div class="data-label">ALTITUDE</div>
+              <div class="data-val" id="sel-alt">— km</div>
+            </div>
+            <div class="data-cell">
+              <div class="data-label">SPEED</div>
+              <div class="data-val" id="sel-speed">— km/s</div>
+            </div>
+            <div class="data-cell">
+              <div class="data-label">LATITUDE</div>
+              <div class="data-val" id="sel-lat">—°</div>
+            </div>
+            <div class="data-cell">
+              <div class="data-label">LONGITUDE</div>
+              <div class="data-val" id="sel-lon">—°</div>
+            </div>
+            <div class="data-cell">
+              <div class="data-label">INCLINATION</div>
+              <div class="data-val" id="sel-inc">—°</div>
+            </div>
+            <div class="data-cell">
+              <div class="data-label">PERIOD</div>
+              <div class="data-val" id="sel-period">— min</div>
+            </div>
+          </div>
+        </div>
+
+      </aside>
+
+      <!-- Satellite detail popup -->
+      <div id="popup" class="popup hidden">
+        <div class="popup-header">
+          <div>
+            <div id="popup-name" class="popup-name">—</div>
+            <div id="popup-group-badge" class="popup-badge">—</div>
+          </div>
+          <button id="popup-close" class="popup-close" aria-label="Close">✕</button>
+        </div>
+        <div class="popup-body">
+          <div class="popup-highlight-row">
+            <div class="popup-highlight-cell">
+              <div class="data-label">ALTITUDE</div>
+              <div class="data-val accent" id="popup-alt">—</div>
+            </div>
+            <div class="popup-highlight-cell">
+              <div class="data-label">SPEED</div>
+              <div class="data-val accent" id="popup-speed">—</div>
+            </div>
+          </div>
+          <div class="popup-row"><span>NORAD ID</span><span id="popup-norad">—</span></div>
+          <div class="popup-row"><span>INTL DESIGNATOR</span><span id="popup-intl">—</span></div>
+          <div class="popup-row"><span>TLE EPOCH</span><span id="popup-epoch">—</span></div>
+          <div class="popup-row"><span>LATITUDE</span><span id="popup-lat">—</span></div>
+          <div class="popup-row"><span>LONGITUDE</span><span id="popup-lon">—</span></div>
+          <div class="popup-row"><span>INCLINATION</span><span id="popup-inc">—</span></div>
+          <div class="popup-row"><span>ECCENTRICITY</span><span id="popup-ecc">—</span></div>
+          <div class="popup-row"><span>PERIOD</span><span id="popup-period">—</span></div>
+        </div>
+      </div>
+
+      <!-- Legend -->
+      <div id="legend">
+        <div class="legend-item">
+          <span class="legend-line" style="background:#ff4444"></span>
+          <span>Chinese LEO</span>
+        </div>
+        <div class="legend-item">
+          <span class="legend-line" style="background:#ffb300"></span>
+          <span>BeiDou GNSS</span>
+        </div>
+        <div class="legend-item">
+          <span class="legend-line" style="background:#00d4ff"></span>
+          <span>Space Station (CSS)</span>
+        </div>
+        <div class="legend-item">
+          <span class="legend-line" style="background:#ffd700; height:2px"></span>
+          <span>Subcontinent Boundary</span>
+        </div>
+        <div class="legend-item">
+          <span class="legend-line" style="background:#ff4444; opacity:0.55"></span>
+          <span>Coverage Footprint</span>
+        </div>
+      </div>
+
+      <!-- Map source attribution -->
+      <div id="map-credit">
+        <div class="mc-header">
+          <span class="mc-icon">🌐</span>
+          <span class="mc-title">MAP SOURCES</span>
+          <button id="mc-toggle" aria-label="Toggle">▲</button>
+        </div>
+        <div id="mc-body">
+          <div class="mc-row">
+            <span class="mc-label">Physical Earth</span>
+            <span class="mc-val">
+              <a href="https://visibleearth.nasa.gov/collection/1484/blue-marble" target="_blank" rel="noopener">NASA Blue Marble NG</a>
+              &amp;
+              <a href="https://earthobservatory.nasa.gov/features/NightLights" target="_blank" rel="noopener">Black Marble</a>
+              (MODIS / VIIRS-DNB)
+            </span>
+          </div>
+          <div class="mc-row">
+            <span class="mc-label">Topography</span>
+            <span class="mc-val">
+              <a href="https://visibleearth.nasa.gov/images/73909" target="_blank" rel="noopener">NASA EOSDIS</a>
+              · Topo, Bathymetry &amp; Ice · 500 m/px
+            </span>
+          </div>
+          <div class="mc-row">
+            <span class="mc-label">Boundaries</span>
+            <span class="mc-val">
+              <a href="https://www.naturalearthdata.com" target="_blank" rel="noopener">Natural Earth</a>
+              1:110m · cross-ref.
+              <a href="https://bhuvan.nrsc.gov.in" target="_blank" rel="noopener">ISRO Bhuvan</a>
+              (SOI)
+            </span>
+          </div>
+          <div class="mc-row">
+            <span class="mc-label">Satellite TLEs</span>
+            <span class="mc-val">
+              <a href="https://celestrak.org" target="_blank" rel="noopener">CelesTrak</a>
+              (Dr. T.S. Kelso) · live SGP4 propagation
+            </span>
+          </div>
+          <div class="mc-note">
+            Political boundary depictions — including the India–Pakistan Line of Control,
+            Aksai Chin, and Arunachal Pradesh — follow the official position of the
+            Government of India as published by the Survey of India.
+          </div>
+        </div>
+      </div>
+
+      <!-- Loading overlay -->
+      <div id="loading">
+        <svg width="48" height="48" viewBox="0 0 48 48" fill="none">
+          <circle cx="24" cy="24" r="10" stroke="#00d4ff" stroke-width="1.5"/>
+          <ellipse cx="24" cy="24" rx="22" ry="10" stroke="#00d4ff" stroke-width="1" opacity="0.4"/>
+          <ellipse cx="24" cy="24" rx="22" ry="10" stroke="#00d4ff" stroke-width="1" opacity="0.4" transform="rotate(60 24 24)"/>
+          <ellipse cx="24" cy="24" rx="22" ry="10" stroke="#00d4ff" stroke-width="1" opacity="0.4" transform="rotate(120 24 24)"/>
+        </svg>
+        <div id="loading-text" class="loading-text">INITIALIZING ARGOS</div>
+        <div class="loading-bar"><div class="loading-fill"></div></div>
+        <div id="loading-status" class="loading-status">Loading Earth model…</div>
+      </div>
+
+    </main>
+  </div>
+
+  <script type="module" src="src/main.js"></script>
+</body>
+</html>
