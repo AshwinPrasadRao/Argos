@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { initSolarSystem, updateSolarSystem } from './solarsystem.js';
 
 const EARTH_R   = 1.0;
 const CLICK_THR = 0.018;
@@ -74,7 +75,7 @@ export async function initGlobe(canvas, onClickCb) {
 
   // Camera positioned to look toward Indian subcontinent (lat≈22°N lon≈80°E)
   // geo2xyz(22, 80) → roughly (0.16, 0.37, -0.91) in globe space
-  camera = new THREE.PerspectiveCamera(45, canvas.clientWidth / canvas.clientHeight, 0.01, 500);
+  camera = new THREE.PerspectiveCamera(45, canvas.clientWidth / canvas.clientHeight, 0.01, 4000);
   camera.position.set(0.45, 1.05, -2.56);
   camera.lookAt(0, 0, 0);
 
@@ -87,7 +88,7 @@ export async function initGlobe(canvas, onClickCb) {
   controls.enableDamping    = true;
   controls.dampingFactor    = 0.06;
   controls.minDistance      = 1.2;
-  controls.maxDistance      = 10;
+  controls.maxDistance      = 1100;     // allow zoom out to full solar-system scale (Neptune ≈ 30 AU ≈ 750 units)
   controls.autoRotate       = true;
   controls.autoRotateSpeed  = 0.20;
   controls.enablePan        = false;
@@ -97,6 +98,7 @@ export async function initGlobe(canvas, onClickCb) {
   await buildEarth();
   buildAtmosphere();
   buildCountryBorders();   // async, fires in background
+  initSolarSystem(scene);  // hidden until the camera zooms out past Earth scale
 
   scene.add(new THREE.AmbientLight(0x0d1a33, 0.5));
 
@@ -112,9 +114,11 @@ export async function initGlobe(canvas, onClickCb) {
 
   (function loop() {
     requestAnimationFrame(loop);
-    uSunDir.value = computeSunDir(new Date());
+    const now = new Date();
+    uSunDir.value = computeSunDir(now);
     controls.update();
     if (cloudMesh) cloudMesh.rotation.y += 0.00007;
+    updateSolarSystem(camera, now);
     renderer.render(scene, camera);
   })();
 }
@@ -122,11 +126,12 @@ export async function initGlobe(canvas, onClickCb) {
 // ── Stars ─────────────────────────────────────────────────────────────────────
 
 function buildStars() {
-  const N = 12000, pos = new Float32Array(N * 3);
+  const N = 14000, pos = new Float32Array(N * 3);
   for (let i = 0; i < N; i++) {
     const th = Math.random() * Math.PI * 2;
     const ph = Math.acos(2 * Math.random() - 1);
-    const r  = 120 + Math.random() * 280;
+    // Placed outside solar-system zoom range (Neptune ≈ 750 units)
+    const r  = 1400 + Math.random() * 600;
     pos[i*3]   = r * Math.sin(ph) * Math.cos(th);
     pos[i*3+1] = r * Math.cos(ph);
     pos[i*3+2] = r * Math.sin(ph) * Math.sin(th);
@@ -134,7 +139,7 @@ function buildStars() {
   const g = new THREE.BufferGeometry();
   g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
   scene.add(new THREE.Points(g, new THREE.PointsMaterial({
-    color: 0xffffff, size: 0.14, sizeAttenuation: true, transparent: true, opacity: 0.8,
+    color: 0xffffff, size: 1.8, sizeAttenuation: true, transparent: true, opacity: 0.85,
   })));
 }
 
