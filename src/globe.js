@@ -282,20 +282,27 @@ const FRAG = /* glsl */`
 
     float NdotL = dot(N, L);
 
-    float dayF   = smoothstep(-0.04, 0.06, NdotL);
-    float nightF = 1.0 - smoothstep(-0.10, 0.02, NdotL);
+    // Wide twilight band: fade across roughly civil → nautical → astronomical
+    // twilight (≈18° solar elevation, NdotL span ≈0.31). The cubic eases out the
+    // hard edges so the terminator reads as a soft gradient rather than a line.
+    float dayF   = smoothstep(-0.32, 0.18, NdotL);
+    float nightF = 1.0 - smoothstep(-0.28, 0.04, NdotL);
 
     vec3 dayTex  = texture2D(uDay, vUv).rgb;
-    float diffuse = clamp(NdotL * 1.4 + 0.08, 0.0, 1.0);
+    // Softer diffuse: lower slope + slight ambient floor so the lit hemisphere
+    // doesn't fall off too aggressively into the terminator zone.
+    float diffuse = clamp(NdotL * 0.95 + 0.18, 0.0, 1.0);
     vec3 dayCol   = dayTex * diffuse * dayF;
 
     vec3 nightTex = texture2D(uNight, vUv).rgb;
-    nightTex      = pow(max(nightTex, vec3(0.0)), vec3(0.45)) * 2.6;
+    nightTex      = pow(max(nightTex, vec3(0.0)), vec3(0.45)) * 2.4;
     vec3 nightCol = nightTex * nightF;
 
-    float tGlow  = smoothstep(0.0, 0.055, NdotL) * smoothstep(0.11, 0.04, NdotL);
-    vec3  atmCol = mix(vec3(0.9, 0.55, 0.2), vec3(0.2, 0.55, 0.95), NdotL * 10.0 + 0.5)
-                   * tGlow * 0.40;
+    // Broader, softer sunset/dawn ring (orange near terminator, blue further into day).
+    float tGlow  = smoothstep(-0.18, 0.02, NdotL) * smoothstep(0.40, 0.06, NdotL);
+    vec3  atmCol = mix(vec3(0.95, 0.55, 0.20), vec3(0.25, 0.60, 0.95),
+                       smoothstep(-0.05, 0.25, NdotL))
+                   * tGlow * 0.45;
 
     float water  = texture2D(uWater, vUv).r;
     vec3  H      = normalize(L + V);
