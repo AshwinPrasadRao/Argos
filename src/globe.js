@@ -7,37 +7,45 @@ const CLICK_THR = 0.018;
 const DEG       = Math.PI / 180;
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  Texture sources
+//  Texture sources — STATIC global mosaics only.
 //
-//  Day  = NASA GIBS BlueMarble_NextGeneration (MODIS Terra, 500 m/px)
-//         blended with today's MODIS true-colour pass
-//  Night = NASA GIBS VIIRS Black Marble (city lights)
-//  Fallbacks = three-globe CDN
+//  Day   = NASA Visible Earth: Blue Marble Topography + Bathymetry + Ice
+//          (Dec 2004 composite) — shaded landforms, ocean depth, polar ice.
+//  Night = NASA Earth at Night 2012 (Black Marble, VIIRS DNB annual mosaic).
+//
+//  Daily MODIS / VIIRS layers are intentionally NOT used: their per-orbit
+//  swath gaps showed up as visible diagonal stripes on the globe. Static
+//  composites are gap-free and align cleanly with the sphere UVs.
+//
+//  Fallbacks = NASA GIBS WMS BlueMarble_NextGeneration → three-globe CDN.
 // ─────────────────────────────────────────────────────────────────────────────
 
-function gibsWMS(layer, time = '') {
-  const t = time ? `&TIME=${time}` : '';
+function gibsWMS(layer) {
   return `https://gibs.earthdata.nasa.gov/wms/epsg4326/best/wms.cgi`
     + `?SERVICE=WMS&VERSION=1.1.1&REQUEST=GetMap&FORMAT=image%2Fjpeg`
     + `&TRANSPARENT=false&LAYERS=${layer}`
-    + `&WIDTH=4096&HEIGHT=2048&SRS=EPSG:4326&BBOX=-180,-90,180,90${t}`;
+    + `&WIDTH=4096&HEIGHT=2048&SRS=EPSG:4326&BBOX=-180,-90,180,90`;
 }
 
-function yesterday() {
-  const d = new Date();
-  d.setUTCDate(d.getUTCDate() - 1);
-  return d.toISOString().slice(0, 10);
-}
+const CDN     = 'https://unpkg.com/three-globe/example/img';
+const NASA_VE = 'https://eoimages.gsfc.nasa.gov/images/imagerecords';
 
-const CDN = 'https://unpkg.com/three-globe/example/img';
+// Texture cascade — every entry is a STATIC, gap-free global mosaic.
+// Daily MODIS / VIIRS layers were removed because their orbit swaths leave
+// diagonal no-data stripes that show up as visible holes on the globe.
 const GLOBE_SRC = {
-  base:    gibsWMS('BlueMarble_NextGeneration'),
-  modis:   gibsWMS('MODIS_Terra_CorrectedReflectance_TrueColor', yesterday()),
-  night:   gibsWMS('VIIRS_SNPP_DayNightBand_ENCC', yesterday()),
-  clouds:  `${CDN}/earth-clouds.png`,
-  water:   `${CDN}/earth-water.png`,
-  baseFB:  `${CDN}/earth-blue-marble.jpg`,
-  nightFB: `${CDN}/earth-night.jpg`,
+  // Day side: NASA Blue Marble Topography + Bathymetry + Ice (Dec 2004) →
+  // GIBS WMS BlueMarble_NextGeneration → three-globe CDN.
+  dayPrimary:  `${NASA_VE}/73000/73938/world.topo.bathy.200412.3x5400x2700.jpg`,
+  dayGIBS:     gibsWMS('BlueMarble_NextGeneration'),
+  dayCDN:      `${CDN}/earth-blue-marble.jpg`,
+
+  // Night side: NASA Black Marble 2012 → three-globe CDN.
+  nightPrimary:`${NASA_VE}/79000/79765/dnb_land_ocean_ice.2012.3600x1800.jpg`,
+  nightCDN:    `${CDN}/earth-night.jpg`,
+
+  clouds:      `${CDN}/earth-clouds.png`,
+  water:       `${CDN}/earth-water.png`,
 };
 
 // ── Subcontinent country IDs (ISO 3166-1 numeric) ─────────────────────────────
@@ -73,14 +81,25 @@ export async function initGlobe(canvas, onClickCb) {
 
   scene  = new THREE.Scene();
 
+  // Read viewport size from the canvas's parent. THREE.WebGLRenderer.setSize()
+  // writes inline `width: 0px; height: 0px` if it ever receives 0,0 — which then
+  // wedges the canvas at zero size because subsequent reads of clientWidth keep
+  // returning 0. The parent (#main) is always laid out, so size from there.
+  const sizeHost = () => {
+    const host = canvas.parentElement || canvas;
+    const r = host.getBoundingClientRect();
+    return { w: Math.max(1, Math.round(r.width)), h: Math.max(1, Math.round(r.height)) };
+  };
+  const { w: w0, h: h0 } = sizeHost();
+
   // Camera positioned to look toward Indian subcontinent (lat≈22°N lon≈80°E)
   // geo2xyz(22, 80) → roughly (0.16, 0.37, -0.91) in globe space
-  camera = new THREE.PerspectiveCamera(45, canvas.clientWidth / canvas.clientHeight, 0.01, 4000);
+  camera = new THREE.PerspectiveCamera(45, w0 / h0, 0.01, 4000);
   camera.position.set(0.45, 1.05, -2.56);
   camera.lookAt(0, 0, 0);
 
   renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: false });
-  renderer.setSize(canvas.clientWidth, canvas.clientHeight);
+  renderer.setSize(w0, h0, false);          // false = don't override CSS, let our 100%/100% rules drive the layout
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   renderer.setClearColor(0x050810, 1);
 
@@ -102,11 +121,18 @@ export async function initGlobe(canvas, onClickCb) {
 
   scene.add(new THREE.AmbientLight(0x0d1a33, 0.5));
 
-  window.addEventListener('resize', () => {
-    camera.aspect = canvas.clientWidth / canvas.clientHeight;
+  // Re-size on viewport change AND on parent layout change (covers iframes
+  // that initialise at 0×0 and only become visible later).
+  const handleResize = () => {
+    const { w, h } = sizeHost();
+    camera.aspect = w / h;
     camera.updateProjectionMatrix();
-    renderer.setSize(canvas.clientWidth, canvas.clientHeight);
-  });
+    renderer.setSize(w, h, false);
+  };
+  window.addEventListener('resize', handleResize);
+  if (typeof ResizeObserver !== 'undefined' && canvas.parentElement) {
+    new ResizeObserver(handleResize).observe(canvas.parentElement);
+  }
 
   canvas.addEventListener('click',      handleClick);
   canvas.addEventListener('mousemove',  handleMouseMove);
@@ -146,8 +172,8 @@ function buildStars() {
 // ── Earth ─────────────────────────────────────────────────────────────────────
 
 async function buildEarth() {
-  const dayTex   = await buildDayComposite();
-  const nightTex = await buildNightTexture();
+  const dayTex   = await loadCascade([GLOBE_SRC.dayPrimary,   GLOBE_SRC.dayGIBS,  GLOBE_SRC.dayCDN],   'day');
+  const nightTex = await loadCascade([GLOBE_SRC.nightPrimary, GLOBE_SRC.nightCDN],                     'night');
   const waterTex = await loadTex(GLOBE_SRC.water);
 
   const geo = new THREE.SphereGeometry(EARTH_R, 128, 128);
@@ -180,59 +206,25 @@ async function buildEarth() {
   }
 }
 
-// ── Day composite texture ─────────────────────────────────────────────────────
+// ── Texture cascade ───────────────────────────────────────────────────────────
+// Each entry in `urls` is tried in order; first success wins. All sources are
+// static, gap-free global mosaics — daily satellite layers were intentionally
+// removed because their orbit-swath patterns leave visible no-data stripes.
 
-async function buildDayComposite() {
-  const W = 4096, H = 2048;
-
-  const baseImg = await fetchBitmap(GLOBE_SRC.base)
-    .catch(() => fetchBitmap(GLOBE_SRC.baseFB))
-    .catch(() => null);
-
-  if (!baseImg) return loadTex(GLOBE_SRC.baseFB).catch(() => null);
-
-  const canvas = document.createElement('canvas');
-  canvas.width = W; canvas.height = H;
-  const ctx = canvas.getContext('2d');
-  ctx.drawImage(baseImg, 0, 0, W, H);
-
-  fetchBitmap(GLOBE_SRC.modis).then(modisImg => {
-    if (!modisImg) return;
-    ctx.save();
-    ctx.globalAlpha = 0.30;
-    ctx.globalCompositeOperation = 'source-over';
-    ctx.drawImage(modisImg, 0, 0, W, H);
-    ctx.restore();
-    if (earthMesh?.material?.uniforms?.uDay?.value)
-      earthMesh.material.uniforms.uDay.value.needsUpdate = true;
-  }).catch(() => {});
-
-  const tex = new THREE.CanvasTexture(canvas);
-  applyTexParams(tex);
-  return tex;
-}
-
-async function buildNightTexture() {
-  const img = await fetchBitmap(GLOBE_SRC.night).catch(() => null);
-  if (img) {
-    const canvas = document.createElement('canvas');
-    canvas.width = img.width; canvas.height = img.height;
-    canvas.getContext('2d').drawImage(img, 0, 0);
-    const tex = new THREE.CanvasTexture(canvas);
-    applyTexParams(tex);
-    return tex;
+async function loadCascade(urls, label) {
+  for (const url of urls) {
+    try {
+      const tex = await loadTex(url);
+      console.info(`[argos] ${label} texture: ${url}`);
+      return tex;
+    } catch (e) {
+      console.warn(`[argos] ${label} texture failed:`, url, e?.message || e);
+    }
   }
-  return loadTex(GLOBE_SRC.nightFB).catch(() => null);
+  return null;
 }
 
 // ── Texture helpers ───────────────────────────────────────────────────────────
-
-async function fetchBitmap(url) {
-  const resp = await fetch(url, { credentials: 'omit', mode: 'cors' });
-  if (!resp.ok) throw new Error(`${resp.status} ${url}`);
-  const blob = await resp.blob();
-  return createImageBitmap(blob);
-}
 
 function loadTex(url) {
   return new Promise((res, rej) => {
@@ -244,6 +236,11 @@ function loadTex(url) {
 function applyTexParams(tex) {
   tex.minFilter = THREE.LinearMipmapLinearFilter;
   tex.magFilter = THREE.LinearFilter;
+  // Sphere geometry's antimeridian seam: U wraps around the globe so a slight
+  // overshoot of 1.0 must read from the start of the texture, not clamp.
+  tex.wrapS = THREE.RepeatWrapping;
+  // Latitude doesn't wrap — the poles must clamp to the topmost / bottommost row.
+  tex.wrapT = THREE.ClampToEdgeWrapping;
   if (renderer) tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
   tex.needsUpdate = true;
 }
